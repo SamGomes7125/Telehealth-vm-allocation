@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Telehealth Admin Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family:sans-serif;background:#f0f4f9;padding:0;margin:0;}
+    header {background:#0069d9;color:#fff;padding:1.2em 2em;font-size:1.3em;margin-bottom:1.5em;}
+    .container{max-width:1150px;margin:0 auto;padding:0 1em;}
+    .tab-btn{background:#fff;padding:8px 20px;border:1px solid #b9d6f0;border-radius:6px;margin:0 6px;cursor:pointer;color:#12294a;font-weight:600;font-size:.97em;}
+    .tab-btn.active{background:#0069d9;color:#fff;}
+    .controls{margin-bottom:1.5em;display:flex;gap:32px;align-items:flex-end;}
+    .card{background:#fff;padding:1.5em;margin-bottom:1.8em;box-shadow:0 2px 8px #0001;border-radius:10px;}
+    .metrics{display:flex;gap:28px;margin-bottom:1em;}
+    .cardcol{flex:1;}
+    label{font-size:.99em;font-weight:500;margin-bottom:4px;display:block;}
+    input,select{border:1px solid #c7d4de;padding:7px 12px;font-size:1em;margin-top:2px;border-radius:7px;}
+    button {padding:8px 28px;background:#0069d9;color:#fff;border-radius:7px;border:none;cursor:pointer;font-weight:600;font-size:1.1em;}
+    button:disabled{opacity:.7;}
+    table{border-collapse:collapse;width:100%;}
+    th,td{padding:5px 10px;text-align:right;}
+    th{background:#e8f0f9;text-align:center;}
+    tr:nth-child(even){background:#f9fbfd;}
+    .section-title{font-weight:700;font-size:1.12em;margin-top:2em;}
+    .mini-btn{font-size:.97em;padding:5px 14px;border-radius:6px;}
+    .kpi-card{background:#fff;border:1px solid #dce8f5;border-radius:10px;padding:14px 16px;box-shadow:0 1px 4px #0001;}
+    .kpi-label{font-size:.80em;color:#5b7a9a;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+    .kpi-val{font-size:1.55em;font-weight:700;color:#12294a;line-height:1.15;}
+    .kpi-sub{font-size:.78em;color:#7a94aa;margin-top:3px;}
+    .day-card{background:#fff;border-radius:10px;padding:14px 16px;border:1px solid #dce8f5;box-shadow:0 1px 4px #0001;}
+    .day-card h4{margin:0 0 8px;font-size:.95em;color:#0069d9;}
+    .day-card .day-row{display:flex;justify-content:space-between;font-size:.85em;padding:2px 0;border-bottom:1px solid #f0f4f9;}
+    .day-card .day-row:last-child{border-bottom:none;}
+    .day-card .day-row span{color:#5b7a9a;}
+    .badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.75em;font-weight:700;}
+    .badge-ok{background:#e4f7ec;color:#1a7a42;}
+    .badge-warn{background:#fff4e0;color:#b06000;}
+    .badge-bad{background:#fde8e8;color:#b00020;}
+    .sla-cell-ok{background:#e4f7ec!important;}
+    .sla-cell-warn{background:#fff4e0!important;}
+    .sla-cell-bad{background:#fde8e8!important;}
+    .day-btn{background:#fff;padding:6px 14px;border:1px solid #b9d6f0;border-radius:6px;cursor:pointer;font-size:.9em;font-weight:500;color:#12294a;}
+    .day-btn.active{background:#0069d9;color:#fff;border-color:#0069d9;}
+    .day-btn:hover:not(.active){background:#e8f4ff;}
+  </style>
+</head>
+<body>
+  <header>Telehealth Admin Dashboard</header>
+  <div class="container">
+    <!-- FIX: use onsubmit on form, not onclick on button, for proper Enter-key support -->
+    <form class="controls" onsubmit="runPrediction();return false;">
+      <div>
+        <label>Total Weekly Bookings</label>
+        <input type="number" id="weekTotal" min="50" max="900" step="10" value="420">
+      </div>
+      <div>
+        <label>Buffer Multiplier</label>
+        <input type="number" id="buffer" min="1" max="4" step="0.1" value="2.1">
+      </div>
+      <div>
+        <label>Provisioning Delay (slots)</label>
+        <input type="number" id="delay" min="0" max="10" value="4">
+      </div>
+      <button type="submit" id="runBtn">Run Prediction</button>
+    </form>
+    <div>
+      <div style="display:flex;gap:10px;margin:1.2em 0;flex-wrap:nowrap;">
+        <button class="tab-btn active" id="btn-unaware"          onclick="selectStrategy('delay_unaware')"          style="flex:1;padding:12px 8px;text-align:center;">Delay-Unaware</button>
+        <button class="tab-btn"        id="btn-aware"            onclick="selectStrategy('delay_aware')"            style="flex:1;padding:12px 8px;text-align:center;">Delay-Aware</button>
+        <button class="tab-btn"        id="btn-delayuncertainty" onclick="selectStrategy('delay_uncertainty_aware')" style="flex:1;padding:12px 8px;text-align:center;">Delay + Uncertainty-Aware</button>
+      </div>
+    </div>
+
+    <!-- STATUS BANNER -->
+    <div id="statusBanner" style="display:none;margin-bottom:1.2em;padding:12px 20px;border-radius:10px;font-weight:600;font-size:1.05em;border-left:6px solid #ccc;"></div>
+
+    <!-- CLINICAL OVERVIEW -->
+    <div class="section-title" style="margin-top:0;">Clinical Overview</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:1.4em;">
+      <div class="kpi-card"><div class="kpi-label">Patients This Week</div><div class="kpi-val" id="c_total">—</div><div class="kpi-sub" id="c_served_sub">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Throughput Rate</div><div class="kpi-val" id="c_throughput">—</div><div class="kpi-sub">patients actually served</div></div>
+      <div class="kpi-card"><div class="kpi-label">Overloaded Slots</div><div class="kpi-val" id="c_overload">—</div><div class="kpi-sub" id="c_overload_sub">of all time slots</div></div>
+      <div class="kpi-card"><div class="kpi-label">Avg Capacity Buffer</div><div class="kpi-val" id="c_headroom">—</div><div class="kpi-sub">sessions above demand/slot</div></div>
+      <div class="kpi-card"><div class="kpi-label">Busiest Slot</div><div class="kpi-val" id="c_peak" style="font-size:1.1em;">—</div><div class="kpi-sub" id="c_peak_sub">—</div></div>
+      <div class="kpi-card"><div class="kpi-label">Est. Infra Cost</div><div class="kpi-val" id="c_cost">—</div><div class="kpi-sub" id="c_cost_sub">—</div></div>
+    </div>
+
+    <!-- TECHNICAL KPIs (collapsed) -->
+    <details style="margin-bottom:1.4em;">
+      <summary style="cursor:pointer;font-weight:600;font-size:1em;padding:8px 0;color:#0069d9;">Technical Metrics — SLA, Response Time, VM Savings</summary>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:10px;">
+        <div class="kpi-card"><div class="kpi-label">SLA Compliance</div><div class="kpi-val" id="sla">—</div><div class="kpi-sub">% of slots within SLA</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Response Time</div><div class="kpi-val" id="avg_rt">—</div><div class="kpi-sub">ms per request</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Setup Latency</div><div class="kpi-val" id="avg_ssl">—</div><div class="kpi-sub">ms to provision VMs</div></div>
+        <div class="kpi-card"><div class="kpi-label">Avg Queue Wait</div><div class="kpi-val" id="avg_qw">—</div><div class="kpi-sub">s (overloaded slots only)</div></div>
+        <div class="kpi-card"><div class="kpi-label">VM Savings vs Flat</div><div class="kpi-val" id="vm_save">—</div><div class="kpi-sub">% fewer VMs than baseline</div></div>
+        <div class="kpi-card"><div class="kpi-label">Ridge α (CV-selected)</div><div class="kpi-val" id="ridge_alpha">—</div><div class="kpi-sub">regularisation strength</div></div>
+      </div>
+    </details>
+
+    <!-- DAY-BY-DAY SUMMARY -->
+    <div class="section-title">Day-by-Day Clinical Summary</div>
+    <div id="daySummaryGrid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin-bottom:1.8em;"></div>
+
+    <div class="section-title">Slot Allocation &amp; Metrics — <span id="whichStr">-</span></div>
+    <div style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+      <span style="font-size:.88em;color:#5b7a9a;font-weight:600;margin-right:4px;">View day:</span>
+      <button class="day-btn active" id="daybtn-0"   onclick="selectDay(0)">Monday</button>
+      <button class="day-btn"        id="daybtn-1"   onclick="selectDay(1)">Tuesday</button>
+      <button class="day-btn"        id="daybtn-2"   onclick="selectDay(2)">Wednesday</button>
+      <button class="day-btn"        id="daybtn-3"   onclick="selectDay(3)">Thursday</button>
+      <button class="day-btn"        id="daybtn-4"   onclick="selectDay(4)">Friday</button>
+      <button class="day-btn"        id="daybtn-all" onclick="selectDay('all')" style="margin-left:8px;background:#f0f4f9;">All Days (weekly totals)</button>
+    </div>
+    <div class="card">
+      <div id="chartTitle" style="font-size:.92em;color:#5b7a9a;margin-bottom:8px;font-weight:600;"></div>
+      <canvas id="planChart"></canvas>
+    </div>
+    <div class="card">
+      <table id="planTable"></table>
+    </div>
+
+  </div>
+
+  <script>
+    let lastResults = {}, tab = "delay_unaware", currentDayMode = 0;
+    const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday"];
+
+    async function runPrediction() {
+      document.getElementById('runBtn').disabled = true;
+      const weekTotal = +document.getElementById('weekTotal').value;
+      const buffer    = +document.getElementById('buffer').value;
+      const delay     = +document.getElementById('delay').value;
+
+      // FIX: use relative URL instead of hardcoded localhost:8080
+      // This works in any deployment environment (local, Docker, cloud).
+      const res = await fetch("/predict", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({week_total: weekTotal, buffer, delay})
+      });
+      lastResults = await res.json();
+      selectStrategy(tab, true);
+      document.getElementById('runBtn').disabled = false;
+    }
+
+    function selectStrategy(t, noTab) {
+      tab = t;
+      if (!noTab) {
+        ["btn-unaware","btn-aware","btn-delayuncertainty"].forEach(id =>
+          document.getElementById(id).classList.remove("active"));
+        const btnMapping = {
+          "delay_unaware":           "btn-unaware",
+          "delay_aware":             "btn-aware",
+          "delay_uncertainty_aware": "btn-delayuncertainty",
+        };
+        document.getElementById(btnMapping[t]).classList.add("active");
+      }
+      renderClinical();
+      renderKPIs();
+      renderDaySummary();
+      renderChart();
+      renderTable();
+    }
+
+    function renderClinical() {
+      let s = lastResults[tab]?.summary || {};
+      let banner = document.getElementById("statusBanner");
+      if (s.status_label) {
+        banner.style.display = "block";
+        let col="#0069d9", bg="#e8f4ff", border="#0069d9";
+        if (s.sla_pct >= 98)      { col="#1a7a42"; bg="#e4f7ec"; border="#1a7a42"; }
+        else if (s.sla_pct >= 92) { col="#b06000"; bg="#fff4e0"; border="#f59e0b"; }
+        else                      { col="#b00020"; bg="#fde8e8"; border="#b00020"; }
+        banner.style.background      = bg;
+        banner.style.borderLeftColor = border;
+        banner.style.color           = col;
+        banner.textContent = "Status: " + s.status_label;
+      }
+      document.getElementById("c_total").textContent      = s.total_patients != null ? s.total_patients.toLocaleString() : "—";
+      document.getElementById("c_served_sub").textContent = s.patients_served != null
+        ? s.patients_served.toLocaleString() + " served, " + s.patients_unserved + " unserved" : "—";
+      document.getElementById("c_throughput").textContent = s.throughput_pct != null ? s.throughput_pct + "%" : "—";
+      document.getElementById("c_overload").textContent   = s.overload_slots != null ? s.overload_slots : "—";
+      document.getElementById("c_overload_sub").textContent = s.overload_pct != null
+        ? s.overload_pct + "% of all time slots" : "of all time slots";
+      document.getElementById("c_headroom").textContent   = s.avg_headroom != null
+        ? (s.avg_headroom >= 0 ? "+" : "") + s.avg_headroom + " sessions" : "—";
+      document.getElementById("c_peak").textContent       = s.peak_slot || "—";
+      document.getElementById("c_peak_sub").textContent   = s.peak_demand != null ? s.peak_demand + " sessions" : "—";
+      document.getElementById("c_cost").textContent       = s.infra_cost_usd != null ? "$" + s.infra_cost_usd.toFixed(2) : "—";
+      document.getElementById("c_cost_sub").textContent   = s.cost_saving_usd != null
+        ? "$" + s.cost_saving_usd.toFixed(2) + " saved vs flat provisioning" : "—";
+    }
+
+    function renderKPIs() {
+      let s = lastResults[tab]?.summary || {};
+      document.getElementById("sla").textContent         = s.sla_pct       != null ? s.sla_pct + "%" : "—";
+      document.getElementById("avg_rt").textContent      = s.avg_rt_ms     != null ? s.avg_rt_ms + " ms" : "—";
+      document.getElementById("avg_ssl").textContent     = s.avg_ssl_ms    != null ? s.avg_ssl_ms + " ms" : "—";
+      document.getElementById("avg_qw").textContent      = s.avg_qw_sec    != null ? s.avg_qw_sec + " s" : "—";
+      document.getElementById("vm_save").textContent     = s.vm_saving_pct != null ? s.vm_saving_pct + "%" : "—";
+      // Show the CV-selected Ridge alpha so researchers can verify regularisation
+      document.getElementById("ridge_alpha").textContent = s.ridge_alpha   != null ? s.ridge_alpha : "—";
+      document.getElementById("whichStr").textContent    = tab.replace(/_/g," ").toUpperCase();
+    }
+
+    function renderDaySummary() {
+      let ds   = lastResults[tab]?.day_stats || {};
+      let grid = document.getElementById("daySummaryGrid");
+      grid.innerHTML = DAYS.map(day => {
+        let d = ds[day];
+        if (!d) return "<div class='day-card'><h4>" + day + "</h4><p style='color:#aaa;font-size:.85em;'>No data</p></div>";
+        let slaBadge = d.sla_pct >= 98 ? "badge-ok" : d.sla_pct >= 85 ? "badge-warn" : "badge-bad";
+        let olBadge  = d.overload_slots === 0 ? "badge-ok" : d.overload_slots <= 2 ? "badge-warn" : "badge-bad";
+        return "<div class='day-card'>" +
+          "<h4>" + day + " <span class='badge " + slaBadge + "'>" + d.sla_pct + "% SLA</span></h4>" +
+          "<div class='day-row'><span>Patients expected</span><b>" + d.total_patients + "</b></div>" +
+          "<div class='day-row'><span>Patients served</span><b>"   + d.patients_served + "</b></div>" +
+          "<div class='day-row'><span>Overloaded slots</span><b><span class='badge " + olBadge + "'>" + d.overload_slots + "</span></b></div>" +
+          "<div class='day-row'><span>Peak time</span><b>" + d.peak_time + " (" + d.peak_demand + " ses.)</b></div>" +
+          "<div class='day-row'><span>Avg capacity buffer</span><b>" + (d.avg_headroom >= 0 ? "+" : "") + d.avg_headroom + "</b></div>" +
+          "</div>";
+      }).join("");
+    }
+
+    let planChart;
+
+    function selectDay(d) {
+      currentDayMode = d;
+      for (let i = 0; i < 5; i++) document.getElementById("daybtn-" + i).classList.remove("active");
+      document.getElementById("daybtn-all").classList.remove("active");
+      if (d === "all") document.getElementById("daybtn-all").classList.add("active");
+      else             document.getElementById("daybtn-" + d).classList.add("active");
+      renderChart();
+      renderTable();
+    }
+
+    function renderChart() {
+      if (planChart) planChart.destroy();
+      let allSlots = lastResults[tab]?.slots || [];
+      let ctx = document.getElementById("planChart").getContext('2d');
+      let chartTitle = document.getElementById("chartTitle");
+      let labels, actualData, predictedData, bufferedData;
+
+      if (currentDayMode === "all") {
+        chartTitle.textContent = "All 5 days combined — each bar = sum of that time slot across the week";
+        let timeMap = {};
+        allSlots.forEach(r => {
+          if (!timeMap[r.time]) timeMap[r.time] = {actual:0, predicted:0, buffered:0};
+          timeMap[r.time].actual    += r.actual;
+          timeMap[r.time].predicted += r.predicted;
+          timeMap[r.time].buffered  += r.buffered;
+        });
+        labels        = Object.keys(timeMap);
+        actualData    = labels.map(t => timeMap[t].actual);
+        predictedData = labels.map(t => Math.round(timeMap[t].predicted * 10) / 10);
+        bufferedData  = labels.map(t => timeMap[t].buffered);
+      } else {
+        let dayName = DAYS[currentDayMode];
+        chartTitle.textContent = dayName + " — 20 half-hour slots (08:00 to 17:30)";
+        let slots = allSlots.filter(r => r.day === dayName);
+        labels        = slots.map(r => r.time);
+        actualData    = slots.map(r => r.actual);
+        predictedData = slots.map(r => r.predicted);
+        bufferedData  = slots.map(r => r.buffered);
+      }
+
+      planChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels,
+          datasets: [
+            {label:"Actual patients",    data:actualData,    backgroundColor:"#d2e3fc"},
+            {label:"Predicted demand",   data:predictedData, backgroundColor:"#6cb6f0"},
+            {label:"Allocated capacity", data:bufferedData,  type:"line", borderColor:"#ffa600",
+             borderWidth:2, pointRadius:3, fill:false, tension:0.2}
+          ]
+        },
+        options:{
+          responsive:true,
+          plugins:{legend:{position:"top"}},
+          scales:{
+            x:{ticks:{autoSkip:false, maxRotation:45, font:{size:11}}},
+            y:{title:{display:true, text:"Sessions"}, beginAtZero:true}
+          }
+        }
+      });
+    }
+
+    function renderTable() {
+      let allSlots = lastResults[tab]?.slots || [];
+      let slots = currentDayMode === "all"
+        ? allSlots
+        : allSlots.filter(r => r.day === DAYS[currentDayMode]);
+      let tbl = `<tr><th>Time</th><th>Actual</th><th>Predicted</th><th>Capacity</th>
+        <th>VMs</th><th>CPU</th><th>RAM</th><th>Resp. Time</th><th>Setup L.</th><th>Queue Wait</th><th>SLA</th><th>Utilization</th></tr>`;
+      tbl += slots.map(r => {
+        let overloaded = r.actual > r.buffered;
+        let nearFull   = !overloaded && (r.actual / Math.max(r.buffered, 1)) > 0.85;
+        let rowClass   = overloaded ? "sla-cell-bad" : nearFull ? "sla-cell-warn" : "sla-cell-ok";
+        let slaIcon    = r.sla_ok ? "✔" : "✘";
+        let util       = Math.round(r.actual / Math.max(r.buffered, 1) * 100);
+        return `<tr class="${rowClass}">
+          <td>${r.time}</td><td>${r.actual}</td><td>${r.predicted}</td><td>${r.buffered}</td>
+          <td>${r.vms}</td><td>${r.cpu}</td><td>${r.ram} GB</td><td>${r.rt_ms} ms</td>
+          <td>${r.ssl_ms} ms</td><td>${r.qw_sec > 0 ? r.qw_sec + "s" : "—"}</td>
+          <td style="text-align:center;font-weight:700;">${slaIcon}</td>
+          <td>${util}%</td>
+        </tr>`;
+      }).join("");
+      document.getElementById("planTable").innerHTML = tbl;
+    }
+
+
+    window.onload = function() {
+      runPrediction().then(() => {});
+    };
+  </script>
+</body>
+</html>
